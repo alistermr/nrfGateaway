@@ -14,6 +14,9 @@ include_directories(${ZEPHYR_NRF_MODULE_DIR}/samples/bluetooth/mesh/common)
 target_sources(app PRIVATE
   src/main.c
   src/model_handler.c
+  src/log_capture.c
+  src/uart_cmd.c
+  src/init.c
 )
 target_include_directories(app PRIVATE
   include
