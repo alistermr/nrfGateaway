@@ -49,7 +49,7 @@ static struct k_work uart_rx_cloud_work;
 
 /* Example message */
 #define CUSTOM_TOPICM_FMT "sample_message"
-#define SAMPLE_MSG_FMT                                     \
+#define SAMPLE_MSG_FMT                 \
 	"\"Hello Cloud, from the device! " \
 	"Message ID: %lld\""
 #define SAMPLE_MSG_BUF_SIZE (sizeof(SAMPLE_MSG_FMT) + 19)
@@ -128,10 +128,7 @@ static int send_uart_rx_to_cloud(const char *uart_line)
 	};
 
 	err = nrf_cloud_send(&mqtt_msg);
-	if (err)
-	{
-		nrf_cloud_obj_free(&msg_obj);
-	}
+	nrf_cloud_obj_free(&msg_obj);
 
 	return err;
 }
@@ -295,14 +292,13 @@ static void await_credentials(void)
 	LOG_INF("nRF Cloud credentials detected!");
 }
 
-
 /**
  * @brief Construct a device message object with automatically generated timestamp
  *
  * The resultant JSON object will be conformal to the General Message Schema described in the
  * application-protocols repo:
- *
- 
+ */
+
 /**
  * @brief Construct a device message object with automatically generated timestamp
  *
@@ -378,7 +374,6 @@ static int send_message(struct nrf_cloud_obj *msg)
 	return ret;
 }
 
-
 static int send_hello_world_msg(void)
 {
 	int err = 0;
@@ -423,6 +418,8 @@ static int send_hello_world_msg(void)
 
 	/* Send off a hello world message! */
 	err = send_message(&msg_obj);
+	nrf_cloud_obj_free(&msg_obj);
+
 	if (err)
 	{
 		LOG_ERR("Failed to send Hello World message");
@@ -540,26 +537,6 @@ static void cloud_event_handler(const struct nrf_cloud_evt *nrf_cloud_evt)
 						LOG_INF("UART TX data: %s", uart_data);
 					}
 				}
-			}
-
-			if (strstr(cmd_buf, "\"appId\":\"led\""))
-			{
-				if (strstr(cmd_buf, "\"data\":\"led_on\"") ||
-					strstr(cmd_buf, "led_on"))
-				{
-					dk_set_led(SEND_LED_NUM_4, 1);
-					LOG_INF("Command received: LED ON");
-				}
-				else if (strstr(cmd_buf, "\"data\":\"led_off\"") ||
-						 strstr(cmd_buf, "led_off"))
-				{
-					dk_set_led(SEND_LED_NUM_4, 0);
-					LOG_INF("Command received: LED OFF");
-				}
-			}
-			else if (strstr(cmd_buf, "\"appId\":\"sensor\""))
-			{
-				LOG_INF("Du er inne i sensor kommandoen");
 			}
 		}
 		else

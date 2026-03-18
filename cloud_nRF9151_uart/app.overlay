@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
-/ {
-	chosen {
-		ncs,sm-uart = &dtr_uart2;
-		nordic,pm-ext-flash = &gd25wb256;
-	};
-};
+// / {
+// 	chosen {
+// 		ncs,sm-uart = &uart2;
+// 		nordic,pm-ext-flash = &gd25wb256;
+// 	};
+// };
 
 &pinctrl {
 	uart2_default: uart2_default {
@@ -44,13 +44,6 @@
 	pinctrl-1 = <&uart2_sleep>;
 	pinctrl-names = "default", "sleep";
 	hw-flow-control;
-
-	dtr_uart2: dtr-uart {
-		compatible = "nordic,dtr-uart";
-		dtr-gpios = <&gpio0 8 (GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
-		ri-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
-		status = "okay";
-	};
 };
 
 &gpio0 {
