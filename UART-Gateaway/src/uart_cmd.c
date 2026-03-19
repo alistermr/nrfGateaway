@@ -10,6 +10,10 @@
 #include <stdio.h>
 #include "log_capture.h"
 
+//kanksje
+#include <zephyr/bluetooth/mesh.h>
+#include <zephyr/bluetooth/mesh/shell.h>
+
 
 #define CMD_BUFFER_SIZE 512
 #define CMD_QUEUE_LEN   32
@@ -23,9 +27,47 @@ K_MSGQ_DEFINE(cmd_msgq, CMD_BUFFER_SIZE, CMD_QUEUE_LEN, 4);
 static const char *commands[] = {
     "init",
     "scan",
-    "provision",
+    "prov",
+    "bind",
     NULL
 };
+
+
+static void predefined_commands(const char *command);
+static void uart30_send(const char *data, size_t len);
+
+static void uuid_to_str(const uint8_t uuid[16], char *out, size_t out_len)
+{
+    static const char hex[] = "0123456789abcdef";
+    size_t p = 0;
+
+    for (size_t i = 0; i < 16 && (p + 2) < out_len; i++) {
+        out[p++] = hex[(uuid[i] >> 4) & 0x0F];
+        out[p++] = hex[uuid[i] & 0x0F];
+    }
+
+    if (p < out_len) {
+        out[p] = '\0';
+    } else if (out_len > 0) {
+        out[out_len - 1] = '\0';
+    }
+}
+
+/* Note: Signature may vary slightly by Zephyr version. */
+static void uart_unprov_beacon_cb(const uint8_t uuid[16],
+                                  bt_mesh_prov_oob_info_t oob_info,
+                                  uint32_t *uri_hash){
+    char uuid_str[33];
+    char line[128];
+
+    uuid_to_str(uuid, uuid_str, sizeof(uuid_str));
+
+    snprintk(line, sizeof(line),
+             "uuid=%s\r\n",
+             uuid_str);
+
+    uart30_send(line, strlen(line));
+}
 
 static bool enqueue_command(const char *cmd)
 {
@@ -42,7 +84,6 @@ static bool enqueue_command(const char *cmd)
     }
     return true;
 }
-static void predefined_commands(const char *command);
 
 size_t strip_ansi_escapes(const char *src, size_t src_len, char *dst, size_t dst_size) {
     size_t dst_pos = 0;
@@ -138,10 +179,12 @@ static void predefined_commands(const char *command)
         scanning = !scanning;
         if (scanning) {
             printk("Scanning for devices...\n");
-            enqueue_command("mesh prov beacon-listen on");
+            //enqueue_command("mesh prov beacon-listen on");
+            bt_mesh_shell_prov.unprovisioned_beacon = uart_unprov_beacon_cb;
         } else {
             printk("Stopping scan...\n");
-            enqueue_command("mesh prov beacon-listen off");
+            //enqueue_command("mesh prov beacon-listen off");
+            bt_mesh_shell_prov.unprovisioned_beacon = NULL;
         }
     } else if (strncmp(command, "prov", strlen("prov")) == 0) {
         const char *uuid = command + strlen("prov");
