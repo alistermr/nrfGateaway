@@ -20,15 +20,38 @@ static void uart30_send(const char *data, size_t len)
     if (!uart_dev || !device_is_ready(uart_dev)) {
         return;
     }
-
     /* Use a static buffer for stripped output */
 	static char clean_buf[512];
 	size_t clean_len = strip_ansi_escapes(data, len, clean_buf, sizeof(clean_buf));
 
-
     for (size_t i = 0; i < clean_len; i++) {
         uart_poll_out(uart_dev, clean_buf[i]);
     }
+}
+
+size_t strip_ansi_escapes(const char *src, size_t src_len, char *dst, size_t dst_size) {
+    size_t dst_pos = 0;
+    size_t i = 0;
+    while (i < src_len && dst_pos < dst_size - 1) {
+        if (src[i] == 0x1b) {
+            i++;
+            if (i < src_len && src[i] == '[') {
+                i++;
+                while (i < src_len && ((src[i] < '@' || src[i] > '~'))) {
+                    i++;
+                }
+                if (i < src_len) i++;
+            }
+        } else if (src[i] == '~' && i + 2 < src_len && src[i+1] == '$' && src[i+2] == ' ') {
+            i += 3;
+        } else if (src[i] == '\r') {
+            i++;
+        } else {
+            dst[dst_pos++] = src[i++];
+        }
+    }
+    dst[dst_pos] = '\0';
+    return dst_pos;
 }
 
 static void uart_isr(const struct device *dev, void *user_data)
@@ -84,8 +107,6 @@ static void cmd_executor_thread(void)
                 if (output_size > 0) {
                     uart30_send(output, output_size);
                     uart30_send("\r\n", 2);
-                } else if (ret == 0 && !log_capture_has_logs()) {
-                    uart30_send("ACK\r\n", 5);
                 } else {
                     char resp[64];
                     snprintf(resp, sizeof(resp), "ret=%d\r\n", ret);
