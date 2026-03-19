@@ -23,6 +23,7 @@
 //static K_SEM_DEFINE(cmd_count_sem, 0, CMD_BUFFER_SIZE);
 static const struct device *uart_dev;
 K_MSGQ_DEFINE(cmd_msgq, CMD_BUFFER_SIZE, CMD_QUEUE_LEN, 4);
+static void uart30_send(const char *data, size_t len);
 
 static const char *commands[] = {
     "init",
@@ -233,6 +234,8 @@ static void cmd_executor_thread(void)
             size_t output_size;
             const char *output = shell_backend_dummy_get_output(sh, &output_size);
             if (output_size > 0) {
+                //used for forwarding the mesh UUIDs from the shell output to the UART
+                forward_mesh_uuid_from_output(output, output_size);
                 uart30_send(output, output_size);
                 uart30_send("\r\n", 2);
             } else {
