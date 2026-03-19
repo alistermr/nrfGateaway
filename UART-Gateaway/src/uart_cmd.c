@@ -34,7 +34,7 @@ static const char *commands[] = {
 };
 
 
-static void predefined_commands(const char *command);
+static void run_command(const char *command);
 static void uart30_send(const char *data, size_t len);
 
 static void uuid_to_str(const uint8_t uuid[16], char *out, size_t out_len)
@@ -127,6 +127,7 @@ static void uart30_send(const char *data, size_t len)
     }
 }
 
+//receives uart commands from uart and runs them
 static void uart_isr(const struct device *dev, void *user_data)
 {
     ARG_UNUSED(user_data);
@@ -144,17 +145,7 @@ static void uart_isr(const struct device *dev, void *user_data)
         if (c == '\r' || c == '\n') {
             if (uart_buffer_pos > 0) {
                 //check if the command is in the list of allowed commands
-                bool found = false;
-                for (int i = 0; commands[i] != NULL; i++) {
-                    if (strncmp(uart_buffer, commands[i], strlen(commands[i])) == 0) {
-                        predefined_commands(uart_buffer);
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    enqueue_command(uart_buffer);
-                }
+                run_command(uart_buffer);
                 uart_buffer_pos = 0;
                 memset(uart_buffer, 0, sizeof(uart_buffer));
             }
@@ -167,7 +158,7 @@ static void uart_isr(const struct device *dev, void *user_data)
     }
 }
 
-static void predefined_commands(const char *command)
+static void run_command(const char *command)
 {
     static bool scanning = false;
 
@@ -212,7 +203,7 @@ static void predefined_commands(const char *command)
         enqueue_command("mesh models cfg model app-bind 0x0012 0 0x1000");
         enqueue_command("mesh models cfg model app-bind 0x0013 0 0x1000");
     } else {
-        printk("Unknown command: %s\n", command);
+        enqueue_command(command);
     }
 }
 
