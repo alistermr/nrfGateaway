@@ -18,21 +18,24 @@
 
 #define CMD_BUFFER_SIZE 512
 #define CMD_QUEUE_LEN   32
+#define RX_CMD_QUEUE_LEN 32
 //static char *cmd_buffer[CMD_BUFFER_SIZE];
 //static int *cmd_buffer_pos = 0;
 //static K_SEM_DEFINE(cmd_sem, 0, 1);
 //static K_SEM_DEFINE(cmd_count_sem, 0, CMD_BUFFER_SIZE);
 static const struct device *uart_dev;
 K_MSGQ_DEFINE(cmd_msgq, CMD_BUFFER_SIZE, CMD_QUEUE_LEN, 4);
+K_MSGQ_DEFINE(rx_cmd_msgq, CMD_BUFFER_SIZE, RX_CMD_QUEUE_LEN, 4);
+
 static void uart30_send(const char *data, size_t len);
 
 static const char *commands[] = {
-    "init",
-    "scan",
-    "prov",
-    "bind",
+    "init", // format: init
+    "scan", // format: scan
+    "prov", // format: prov <uuid> <net_idx> <app_idx>
     NULL
 };
+
 
 #define MAX_NETKEYS 10
 #define MAX_APPKEYS_PER_NET 10
@@ -45,10 +48,13 @@ typedef struct {
 
 static mesh_network_t mesh_topology[MAX_NETKEYS];
 static uint8_t net_key_count = 0;
+static uint16_t cur_app_idx = 0; // Start AppKey index
+static int prov_count = 0x0010;
 
 
 static void run_command(const char *command);
 static void uart30_send(const char *data, size_t len);
+static bool enqueue_command(const char *cmd); 
 
 static void uuid_to_str(const uint8_t uuid[16], char *out, size_t out_len)
 {
@@ -80,6 +86,33 @@ static void uart_unprov_beacon_cb(const uint8_t uuid[16],
 
     snprintf(line, sizeof(line), "uuid=%s\r\n", uuid_str);
     uart30_send(line, strlen(line));
+}
+
+static void uart_node_added_cb(uint16_t net_idx,
+                               const uint8_t uuid[16],
+                               uint16_t addr,
+                               uint8_t num_elem)
+{
+    ARG_UNUSED(uuid);
+
+
+
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "mesh target dst 0x%04x", addr);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh target net %u", net_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh models cfg appkey add %u %u", net_idx, cur_app_idx);
+        enqueue_command(cmd);
+        for (int i = 0; i < num_elem; i++) {
+            snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr + i, cur_app_idx);
+            enqueue_command(cmd);
+            prov_count += 1;
+        }
+
+        char response[128];
+        snprintf(response, sizeof(response), "Binding complete on app_idx %u and net_idx %u on addresses 0x%04x-0x%04x\r\n", cur_app_idx, net_idx, addr, addr+num_elem-1);
+        uart30_send(response, strlen(response));
 }
 
 static bool enqueue_command(const char *cmd)
@@ -159,15 +192,22 @@ static void uart_isr(const struct device *dev, void *user_data)
         if (c == '\r' || c == '\n') {
             if (uart_buffer_pos > 0) {
                 //check if the command is in the list of allowed commands
-                run_command(uart_buffer);
+                //printk("Received command: %s\n", uart_buffer);
+                //run_command(uart_buffer);
+                (void)k_msgq_put(&rx_cmd_msgq, uart_buffer, K_NO_WAIT);
                 uart_buffer_pos = 0;
                 memset(uart_buffer, 0, sizeof(uart_buffer));
+            }else {
+                printk("Received empty command, ignoring\n");
             }
+
         } else if (uart_buffer_pos < CMD_BUFFER_SIZE - 1) {
             uart_buffer[uart_buffer_pos++] = (char)c;
+            //printk("Received char: %c\n", c);
         } else {
             printk("Command buffer overflow, resetting\n");
             uart_buffer_pos = 0;
+            memset(uart_buffer, 0, sizeof(uart_buffer));
         }
     }
 }
@@ -209,7 +249,6 @@ void add_appkey_to_net(uint16_t net_idx, uint16_t app_idx) {
 static void run_command(const char *command)
 {
     static bool scanning = false;
-    static int prov_count = 0x0010;
 
     if (strcmp(command, "init") == 0) {
         printk("Initializing device...\n");
@@ -219,6 +258,7 @@ static void run_command(const char *command)
         mesh_topology[net_key_count].app_key_count = 0;
         net_key_count++;
         enqueue_command("mesh prov local 0 0x0001");
+        bt_mesh_shell_prov.node_added = uart_node_added_cb;
         const char *response = "init done\r\n";
         uart30_send(response, strlen(response));
     } else if (strcmp(command, "scan") == 0) {
@@ -237,38 +277,17 @@ static void run_command(const char *command)
             bt_mesh_shell_prov.unprovisioned_beacon = NULL;
         }
     } else if (strncmp(command, "prov", strlen("prov")) == 0) {
-        const char *uuid = command + strlen("prov");
-        while (*uuid == ' ') {
-            uuid++;
-        }
-        if (*uuid == '\0') {
-            printk("Provision requires UUID\n");
-            const char *response = "Provision command requires UUID\r\n";
-            uart30_send(response, strlen(response));
-            return;
-        }
-
-        char prov_cmd[CMD_BUFFER_SIZE];
-        snprintf(prov_cmd, sizeof(prov_cmd),
-                 "mesh prov remote-adv %s 0 0x%04x 5", uuid, prov_count);
-        enqueue_command(prov_cmd);
-        prov_count += 4;
-
-        char response[128];
-        snprintf(response, sizeof(response), "Provisioning started, giving address 0x%04x\r\n", prov_count-4);
-        uart30_send(response, strlen(response));
-    } else if (strncmp(command, "bind", strlen("bind")) == 0) {
-        // command format: bind <adress> <net_idx> <app_idx>
-        unsigned int addr = 0U, net_idx = 0U, app_idx = 0U;
-        //char buffer[50];
-
-        if (sscanf(command, "bind %x %u %u", &addr, &net_idx, &app_idx) != 3) {
-            printk("wrong formating bind, Usage: bind <address> <net_idx> <app_idx>\n");
+        unsigned int net_idx = 0U, app_idx = 0U;
+        char uuid[33];
+                                            //%16s 
+        if (sscanf(command, "prov %s %u %u", uuid, &net_idx, &app_idx) != 3) {
+            printk("wrong formating prov, Usage: prov <uuid> <net_idx> <app_idx>\n");
             char response[128];
-            snprintf(response, sizeof(response), "wrong formating bind, Usage: bind <address> <net_idx> <app_idx>\r\n");
+            snprintf(response, sizeof(response), "wrong formating prov, Usage: prov <uuid> <net_idx> <app_idx>\r\n");
             uart30_send(response, strlen(response));
             return;
         }
+
         //check if net_idx and app_idx exist
         bool app_idx_exists = false;
         for (int i = 0; i < net_key_count; i++) {
@@ -286,24 +305,14 @@ static void run_command(const char *command)
             printk("AppKey index %u does not exist under NetKey index %u, creating new\n", app_idx, net_idx);
             add_appkey_to_net(net_idx, app_idx);
         }
+        cur_app_idx = app_idx;
+        char cmd[CMD_BUFFER_SIZE];
+        snprintf(cmd, sizeof(cmd),
+                 "mesh prov remote-adv %s %u 0x%04x 5", uuid, net_idx, prov_count);
+        enqueue_command(cmd);
 
-        char cmd[64];
-        snprintf(cmd, sizeof(cmd), "mesh target dst 0x%04x", addr);
-        enqueue_command(cmd);
-        snprintf(cmd, sizeof(cmd), "mesh target net %u", net_idx);
-        enqueue_command(cmd);
-        snprintf(cmd, sizeof(cmd), "mesh models cfg appkey add %u %u", net_idx, app_idx);
-        enqueue_command(cmd);
-        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr, app_idx);
-        enqueue_command(cmd);
-        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr+1, app_idx);
-        enqueue_command(cmd);
-        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr+2, app_idx);
-        enqueue_command(cmd);
-        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr+3, app_idx);
-        enqueue_command(cmd);
         char response[128];
-        snprintf(response, sizeof(response), "Binding complete on app_idx %u and net_idx %u on addresses 0x%04x-0x%04x\r\n", app_idx, net_idx, addr, addr+3);
+        snprintf(response, sizeof(response), "Provisioning started\r\n");
         uart30_send(response, strlen(response));
     } else {
         enqueue_command(command);
@@ -311,6 +320,18 @@ static void run_command(const char *command)
         uart30_send(response, strlen(response));
     }
 }
+
+static void rx_cmd_router_thread(void)
+{
+    char rx_cmd[CMD_BUFFER_SIZE];
+
+    while (1) {
+        k_msgq_get(&rx_cmd_msgq, rx_cmd, K_FOREVER);
+        run_command(rx_cmd);
+    }
+}
+K_THREAD_DEFINE(rx_router_tid, 2048, rx_cmd_router_thread, NULL, NULL, NULL, 5, 0, 0);
+
 
 static void cmd_executor_thread(void)
 {
