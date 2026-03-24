@@ -1,6 +1,7 @@
 #include "uart_cmd.h"
 //#include <_mingw_stat64.h>
 #include <stdbool.h>
+#include <stdint.h> //vet ikke om trengs
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/printk.h>
@@ -10,7 +11,7 @@
 #include <stdio.h>
 #include "log_capture.h"
 
-//kanksje
+//kanskje
 #include <zephyr/bluetooth/mesh.h>
 #include <zephyr/bluetooth/mesh/shell.h>
 
@@ -33,6 +34,18 @@ static const char *commands[] = {
     NULL
 };
 
+#define MAX_NETKEYS 10
+#define MAX_APPKEYS_PER_NET 10
+
+typedef struct {
+    uint16_t net_idx;
+    uint16_t app_indices[MAX_APPKEYS_PER_NET];
+    uint8_t  app_key_count;
+} mesh_network_t;
+
+static mesh_network_t mesh_topology[MAX_NETKEYS];
+static uint8_t net_key_count = 0;
+
 
 static void run_command(const char *command);
 static void uart30_send(const char *data, size_t len);
@@ -54,7 +67,7 @@ static void uuid_to_str(const uint8_t uuid[16], char *out, size_t out_len)
     }
 }
 
-/* Note: Signature may vary slightly by Zephyr version. */
+
 static void uart_unprov_beacon_cb(const uint8_t uuid[16],
                                   bt_mesh_prov_oob_info_t oob_info,
                                   uint32_t *uri_hash){
@@ -63,10 +76,9 @@ static void uart_unprov_beacon_cb(const uint8_t uuid[16],
 
     uuid_to_str(uuid, uuid_str, sizeof(uuid_str));
 
-    snprintk(line, sizeof(line),
-             "uuid=%s\r\n",
-             uuid_str);
+    printk("uuid=%s\r\n", uuid_str);
 
+    snprintf(line, sizeof(line), "uuid=%s\r\n", uuid_str);
     uart30_send(line, strlen(line));
 }
 
@@ -81,6 +93,8 @@ static bool enqueue_command(const char *cmd)
 
     if (k_msgq_put(&cmd_msgq, tmp, K_NO_WAIT) != 0) {
         printk("Command queue full, dropping: %s\n", tmp);
+        const char *response = "ERROR: Command queue full\r\n";
+        uart30_send(response, strlen(response));
         return false;
     }
     return true;
@@ -158,23 +172,67 @@ static void uart_isr(const struct device *dev, void *user_data)
     }
 }
 
+void add_appkey_to_net(uint16_t net_idx, uint16_t app_idx) {
+    // 1. Finn eksisterende NetKey eller opprett ny
+    int net_pos = -1;
+    for (int i = 0; i < net_key_count; i++) {
+        if (mesh_topology[i].net_idx == net_idx) {
+            net_pos = i;
+            break;
+        }
+    }
+
+    // Hvis NetKey ikke finnes, legg den til
+    if (net_pos == -1 && net_key_count < MAX_NETKEYS) {
+        net_pos = net_key_count;
+        mesh_topology[net_pos].net_idx = net_idx;
+        mesh_topology[net_pos].app_key_count = 0;
+        net_key_count++;
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "mesh prov local %u 0x0001", net_idx);
+        enqueue_command(cmd);
+    }
+
+    // 2. Legg til AppKey under denne NetKey
+    if (net_pos != -1 && mesh_topology[net_pos].app_key_count < MAX_APPKEYS_PER_NET) {
+        mesh_topology[net_pos].app_indices[mesh_topology[net_pos].app_key_count++] = app_idx;
+        
+        // Nå kan du generere kommandoen dynamisk
+        char cmd[64];
+        enqueue_command("mesh target dst local");
+        snprintf(cmd, sizeof(cmd), "mesh models cfg appkey add %u %u", net_idx, app_idx);
+        enqueue_command(cmd);
+    }
+}
+
+
 static void run_command(const char *command)
 {
     static bool scanning = false;
+    static int prov_count = 0x0010;
 
     if (strcmp(command, "init") == 0) {
         printk("Initializing device...\n");
         enqueue_command("mesh init");
         enqueue_command("mesh cdb create");
+        mesh_topology[net_key_count].net_idx = 0;
+        mesh_topology[net_key_count].app_key_count = 0;
+        net_key_count++;
         enqueue_command("mesh prov local 0 0x0001");
+        const char *response = "init done\r\n";
+        uart30_send(response, strlen(response));
     } else if (strcmp(command, "scan") == 0) {
         scanning = !scanning;
         if (scanning) {
             printk("Scanning for devices...\n");
+            const char *response = "scan started\r\n";
+            uart30_send(response, strlen(response));
             //enqueue_command("mesh prov beacon-listen on");
             bt_mesh_shell_prov.unprovisioned_beacon = uart_unprov_beacon_cb;
         } else {
             printk("Stopping scan...\n");
+            const char *response = "scan stopped\r\n";
+            uart30_send(response, strlen(response));
             //enqueue_command("mesh prov beacon-listen off");
             bt_mesh_shell_prov.unprovisioned_beacon = NULL;
         }
@@ -185,25 +243,72 @@ static void run_command(const char *command)
         }
         if (*uuid == '\0') {
             printk("Provision requires UUID\n");
+            const char *response = "Provision command requires UUID\r\n";
+            uart30_send(response, strlen(response));
             return;
         }
 
         char prov_cmd[CMD_BUFFER_SIZE];
         snprintf(prov_cmd, sizeof(prov_cmd),
-                 "mesh prov remote-adv %s 0 0x0010 5", uuid);
+                 "mesh prov remote-adv %s 0 0x%04x 5", uuid, prov_count);
         enqueue_command(prov_cmd);
-    } else if (strcmp(command, "bind") == 0) {
-        enqueue_command("mesh target dst local");
-        enqueue_command("mesh target net 0");
-        enqueue_command("mesh models cfg appkey add 0 0");
-        enqueue_command("mesh target dst 0x0010");
-        enqueue_command("mesh models cfg appkey add 0 0");
-        enqueue_command("mesh models cfg model app-bind 0x0010 0 0x1000");
-        enqueue_command("mesh models cfg model app-bind 0x0011 0 0x1000");
-        enqueue_command("mesh models cfg model app-bind 0x0012 0 0x1000");
-        enqueue_command("mesh models cfg model app-bind 0x0013 0 0x1000");
+        prov_count += 4;
+
+        char response[128];
+        snprintf(response, sizeof(response), "Provisioning started, giving address 0x%04x\r\n", prov_count-4);
+        uart30_send(response, strlen(response));
+    } else if (strncmp(command, "bind", strlen("bind")) == 0) {
+        // command format: bind <adress> <net_idx> <app_idx>
+        unsigned int addr = 0U, net_idx = 0U, app_idx = 0U;
+        //char buffer[50];
+
+        if (sscanf(command, "bind %x %u %u", &addr, &net_idx, &app_idx) != 3) {
+            printk("wrong formating bind, Usage: bind <address> <net_idx> <app_idx>\n");
+            char response[128];
+            snprintf(response, sizeof(response), "wrong formating bind, Usage: bind <address> <net_idx> <app_idx>\r\n");
+            uart30_send(response, strlen(response));
+            return;
+        }
+        //check if net_idx and app_idx exist
+        bool app_idx_exists = false;
+        for (int i = 0; i < net_key_count; i++) {
+            if (mesh_topology[i].net_idx == net_idx) {
+                for (int j = 0; j < mesh_topology[i].app_key_count; j++) {
+                    if (mesh_topology[i].app_indices[j] == app_idx) {
+                        app_idx_exists = true;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (!app_idx_exists) {
+            printk("AppKey index %u does not exist under NetKey index %u, creating new\n", app_idx, net_idx);
+            add_appkey_to_net(net_idx, app_idx);
+        }
+
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "mesh target dst 0x%04x", addr);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh target net %u", net_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh models cfg appkey add %u %u", net_idx, app_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr, app_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr+1, app_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr+2, app_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh models cfg model app-bind 0x%04x %u 0x1000", addr+3, app_idx);
+        enqueue_command(cmd);
+        char response[128];
+        snprintf(response, sizeof(response), "Binding complete on app_idx %u and net_idx %u on addresses 0x%04x-0x%04x\r\n", app_idx, net_idx, addr, addr+3);
+        uart30_send(response, strlen(response));
     } else {
         enqueue_command(command);
+        const char *response = "Command ran\r\n";
+        uart30_send(response, strlen(response));
     }
 }
 
@@ -225,16 +330,16 @@ static void cmd_executor_thread(void)
             size_t output_size;
             const char *output = shell_backend_dummy_get_output(sh, &output_size);
             if (output_size > 0) {
-                uart30_send(output, output_size);
-                uart30_send("\r\n", 2);
+                //uart30_send(output, output_size);
+                //uart30_send("\r\n", 2);
             } else {
                 char resp[64];
                 snprintf(resp, sizeof(resp), "ret=%d\r\n", ret);
-                uart30_send(resp, strlen(resp));
+                //uart30_send(resp, strlen(resp));
             }
         } else {
             printk("Shell backend not available\n");
-            uart30_send("ERROR: Shell not available\r\n", 28);
+            //uart30_send("ERROR: Shell not available\r\n", 28);
         }
     }
 }
