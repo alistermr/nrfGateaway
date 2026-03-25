@@ -33,6 +33,8 @@ static const char *commands[] = {
     "init", // format: init
     "scan", // format: scan
     "prov", // format: prov <uuid> <net_idx> <app_idx>
+    "light", // format: light_on <net_idx> <app_idx> <dst_addr> <on/off>
+    
     NULL
 };
 
@@ -314,7 +316,30 @@ static void run_command(const char *command)
         char response[128];
         snprintf(response, sizeof(response), "Provisioning started\r\n");
         uart30_send(response, strlen(response));
-    } else {
+    } else if (strncmp(command, "light", strlen("light")) == 0) {
+        unsigned int net_idx = 0U, app_idx = 0U, dst_addr = 0U, on_off = 0U;
+        if (sscanf(command, "light %u %u %u %u", &net_idx, &app_idx, &dst_addr, &on_off) != 4) {
+            printk("wrong formating light command, Usage: light <net_idx> <app_idx> <dst_addr> <on/off>\n");
+            char response[128];
+            snprintf(response, sizeof(response), "wrong formating light command, Usage: light <net_idx> <app_idx> <dst_addr> <on/off>\r\n");
+            uart30_send(response, strlen(response));
+            return;
+        }
+        char cmd[100];
+        snprintf(cmd, sizeof(cmd), "mesh target net %u", net_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh target app %u", app_idx);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh target dst 0x%04x", dst_addr);
+        enqueue_command(cmd);
+        snprintf(cmd, sizeof(cmd), "mesh test net-send 82020%u00", on_off);
+        enqueue_command(cmd);
+
+        char response[128];
+        snprintf(response, sizeof(response), "Light command sent to 0x%04x\r\n", dst_addr);
+        uart30_send(response, strlen(response));
+    
+    }else {
         enqueue_command(command);
         const char *response = "Command ran\r\n";
         uart30_send(response, strlen(response));
@@ -350,6 +375,7 @@ static void cmd_executor_thread(void)
             printk("shell_execute_cmd returned: %d\n", ret);
             size_t output_size;
             const char *output = shell_backend_dummy_get_output(sh, &output_size);
+            //printk("Command output: %.*s", (int)output_size, output);
             if (output_size > 0) {
                 //uart30_send(output, output_size);
                 //uart30_send("\r\n", 2);
