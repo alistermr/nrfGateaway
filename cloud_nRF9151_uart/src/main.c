@@ -144,11 +144,11 @@ static void uart_rx_cloud_work_handler(struct k_work *work)
 		int err = send_uart_rx_to_cloud(uart_line);
 		if (err == -EAGAIN)
 		{
-			LOG_WRN("Cloud not ready, dropping UART RX message");
+			LOG_INF("Cloud not ready, dropping UART RX message");
 		}
 		else if (err)
 		{
-			LOG_ERR("Failed to send UART RX to cloud: %d", err);
+			LOG_INF("Failed to send UART RX to cloud: %d", err);
 		}
 		else
 		{

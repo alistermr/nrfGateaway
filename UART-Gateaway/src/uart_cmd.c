@@ -32,7 +32,7 @@ static void uart30_send(const char *data, size_t len);
 static const char *commands[] = {
     "init", // format: init
     "scan", // format: scan
-    "prov", // format: prov <uuid> <net_idx> <app_idx>
+    "prov", // format: prov <uuid> <net_idx> <Addr> <
     NULL
 };
 
@@ -165,7 +165,7 @@ static void uart30_send(const char *data, size_t len)
     }
 
     /* Use a static buffer for stripped output */
-	static char clean_buf[512];
+	static char clean_buf[1024];
 	size_t clean_len = strip_ansi_escapes(data, len, clean_buf, sizeof(clean_buf));
 
 
