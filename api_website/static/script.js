@@ -197,18 +197,30 @@ function renderProvisionedList() {
     list.innerHTML = "";
 
     cache.forEach((addr, i) => {
+        let elementsHtml = "";
         for (let u = 0; u < 4; u++) {
-            const elemAddr = addr + u; // numeric addition
+            const elemAddr = addr + u;
             const elemAddrHex = "0x" + elemAddr.toString(16).padStart(4, "0");
-            const el = document.createElement("div");
-            el.className = "device-item";
-            el.innerHTML =
-                `<span><span class="device-index">Node ${i} — Element ${u}</span>` +
-                `<span class="device-uuid">${elemAddrHex}</span></span>` +
-                `<button class="btn-device" onclick="toggle_light(${elemAddr}, true)">On</button>` +
-                `<button class="btn-device" onclick="toggle_light(${elemAddr}, false)" style="background:#ef4444;color:#fff;">Off</button>`;
-            list.appendChild(el);
+            elementsHtml += `
+                <div class="element-card">
+                    <div class="element-header">
+                        <span class="el-label">EL ${u}</span>
+                        <span class="el-addr">${elemAddrHex}</span>
+                    </div>
+                    <button class="btn-el-on" onclick="toggle_light(${elemAddr}, true)">ON</button>
+                    <button class="btn-el-off" onclick="toggle_light(${elemAddr}, false)">OFF</button>
+                </div>`;
         }
+
+        const nodeCard = document.createElement("div");
+        nodeCard.className = "node-card";
+        nodeCard.innerHTML = `
+            <div class="node-header">
+                <span class="node-title">Node ${i}</span>
+                <span class="node-element-count">4 elements</span>
+            </div>
+            <div class="node-elements">${elementsHtml}</div>`;
+        list.appendChild(nodeCard);
     });
 }
 

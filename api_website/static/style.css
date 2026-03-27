@@ -403,6 +403,107 @@ button:active { transform: scale(.97); }
     box-shadow: none;
 }
 
+/* ── Node cards (provisioned devices) ── */
+#provisionedList {
+    max-height: none;
+    overflow-y: visible;
+}
+
+.node-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: .85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .65rem;
+}
+
+.node-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.node-title {
+    font-size: .9rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.node-element-count {
+    font-size: .72rem;
+    color: var(--text-dim);
+}
+
+.node-elements {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: .5rem;
+}
+
+.element-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.element-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .35rem .5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.el-label {
+    font-size: .68rem;
+    font-weight: 600;
+    color: var(--text-dim);
+}
+
+.el-addr {
+    font-family: var(--mono);
+    font-size: .62rem;
+    color: var(--text-mono);
+}
+
+.btn-el-on {
+    flex: 1;
+    padding: .45rem;
+    background: var(--surface-2);
+    color: var(--text);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    font-size: .75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    text-align: center;
+}
+
+.btn-el-on:hover { background: var(--border-hl); }
+
+.btn-el-off {
+    flex: 1;
+    padding: .45rem;
+    background: var(--red);
+    color: #fff;
+    border: none;
+    border-radius: 0;
+    font-size: .75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    text-align: center;
+}
+
+.btn-el-off:hover { background: #dc2626; }
+
 /* ── Scrollbar styling ── */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
