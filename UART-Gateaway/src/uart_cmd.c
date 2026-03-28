@@ -38,6 +38,8 @@ static const char *commands[] = {
     NULL
 };
 
+static char *uuids_cur_scan[32];
+static int num_uuids_cur_scan = 0;
 
 #define MAX_NETKEYS 10
 #define MAX_APPKEYS_PER_NET 10
@@ -86,6 +88,15 @@ static void uart_unprov_beacon_cb(const uint8_t uuid[16],
 
     printk("uuid=%s\r\n", uuid_str);
 
+    for (int i = 0; i < num_uuids_cur_scan; i++) {
+        if (strcmp(uuids_cur_scan[i], uuid_str) == 0) {
+            return;
+        }
+    }
+    if (num_uuids_cur_scan < 32) {
+        uuids_cur_scan[num_uuids_cur_scan++] = strdup(uuid_str);
+    }
+
     snprintf(line, sizeof(line), "uuid=%s\r\n", uuid_str);
     uart30_send(line, strlen(line));
 }
@@ -95,7 +106,6 @@ static void uart_node_added_cb(uint16_t net_idx,
                                uint16_t addr,
                                uint8_t num_elem)
 {
-    ARG_UNUSED(uuid);
 
 
 
@@ -251,7 +261,7 @@ void add_appkey_to_net(uint16_t net_idx, uint16_t app_idx) {
 static void run_command(const char *command)
 {
     static bool scanning = false;
-
+    printk("Running command: %s\n", command);
     if (strcmp(command, "init") == 0) {
         printk("Initializing device...\n");
         enqueue_command("mesh init");
@@ -270,6 +280,7 @@ static void run_command(const char *command)
             const char *response = "scan started\r\n";
             uart30_send(response, strlen(response));
             //enqueue_command("mesh prov beacon-listen on");
+            num_uuids_cur_scan = 0; // Reset UUID list for new scan
             bt_mesh_shell_prov.unprovisioned_beacon = uart_unprov_beacon_cb;
         } else {
             printk("Stopping scan...\n");

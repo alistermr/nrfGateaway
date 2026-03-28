@@ -291,7 +291,7 @@ async function provisionSelected() {
     if (selectedDeviceIdx === null) return;
 
     const uuid = nonProvCache[selectedDeviceIdx];
-    const nextAddrNum = addressCache.length * 0x10;
+    const nextAddrNum = (addressCache.length - 1) * 4 + 0x10;
     const toHex = (n) => "0x" + n.toString(16).padStart(4, "0");
     const nextAddr = toHex(nextAddrNum);
 
